@@ -1,0 +1,267 @@
+--[x] 1.1 Retrieve all members
+SELECT * FROM members;
+
+--[x] 1.2 Update a member's contact information
+UPDATE members
+SET phone_number = '555-9876', email = 'emily.jones.updated@email.com'
+WHERE member_id = 5;
+
+SELECT * FROM members
+WHERE member_id = '5';
+
+--[x] 1.3 Count total number of members
+SELECT COUNT(member_id)
+FROM members;
+
+--[x] 1.4 Find member with the most class registrations
+SELECT
+ m.member_id, 
+ m.first_name, 
+ m.last_name, 
+ COUNT(ca.member_id) AS registration_count
+FROM 
+ members AS m
+JOIN 
+ class_attendance AS ca ON m.member_id = ca.member_id
+GROUP BY 
+ m.member_id, m.first_name, m.last_name
+ORDER BY  
+ registration_count DESC
+LIMIT 1; -- Only show the top result 
+
+--[x] 1.5 Find member with the least class registrations
+SELECT 
+ m.member_id, 
+ m.first_name, 
+ m.last_name, 
+ COUNT(class_attendance_id) AS registration_count
+FROM members m
+LEFT JOIN class_attendance ca ON m.member_id = ca.member_id
+GROUP BY m.member_id
+ORDER BY registration_count
+LIMIT 1;
+
+--[x] 1.6 Calculate the percentage of members who have attended at least one class
+SELECT 
+  CAST(SUM(CASE WHEN attendance_count >= 1 THEN 1 ELSE 0 END) AS REAL) * 100 / COUNT(*) AS PercentageAttendedAtLeastOneClass -- Outer query for % calculation
+FROM ( -- Inner query 
+  SELECT 
+    m.member_id, 
+    COUNT(DISTINCT ca.schedule_id) AS attendance_count
+  FROM members AS m
+  LEFT JOIN class_attendance AS ca ON m.member_id = ca.member_id
+  GROUP BY m.member_id
+) AS member_attendance;
+
+--2. Payment Management (payment_management.sql)
+--[x] 2.1 Record a payment for a membership
+INSERT INTO payments (
+  member_id, 
+  amount, 
+  payment_date, 
+  payment_method, 
+  payment_type)
+VALUES ('11', '50', '2025-02-5 09:18:00', 'Credit Card', 'Monthly membership fee');
+
+--[x] 2.2 Calculate total revenue from membership fees for each month of the last year
+SELECT strftime(
+  '%Y-%m', 
+  payment_date) AS payment_month, 
+  SUM(amount) AS total_revenue
+FROM payments
+WHERE payment_type = 'Monthly membership fee'
+AND payment_date BETWEEN date('now', '-1 year') 
+AND date('now')
+GROUP BY payment_month
+ORDER BY payment_month;
+
+--[x] 2.3 Find all day pass purchases
+SELECT 
+ payment_id, 
+ amount, 
+ payment_date, 
+ payment_method
+FROM payments 
+WHERE payment_type = 'Day pass';
+
+-- 3. Equipment Management (equipment_management.sql)
+--[x] 3.1 Find equipment due for maintenance in the next 30 days
+SELECT 
+ e.equipment_id, 
+ e.name AS equipment_name, 
+ e.next_maintenance_date
+FROM equipment AS e
+WHERE e.next_maintenance_date BETWEEN date('now') AND date('now', '+30 days');
+
+--[x] 3.2 Count equipment types in stock
+SELECT type, COUNT(*) AS count
+FROM equipment
+GROUP BY type;
+
+--[x] 3.3 Calculate average age of equipment by type (in days)
+SELECT type AS 
+ equipment_type, 
+ CAST(AVG(JULIANDAY('now') - JULIANDAY(purchase_date)) AS INTEGER) AS avg_age_days
+FROM equipment
+GROUP BY equipment_type;
+
+-- 4. Class Scheduling (class_scheduling.sql)
+--[x] 4.1 List all classes with their instructors
+SELECT c.class_id, c.name AS class_name, s.first_name || ' ' || s.last_name AS instructor_name
+FROM classes AS c
+JOIN class_schedule AS cs ON c.class_id = cs.class_id
+JOIN staff AS s ON cs.staff_id = s.staff_id;
+
+--[x] 4.2 Find available classes for a specific date
+SELECT c.class_id, c.name, cs.start_time,cs.end_time, (c.capacity - COUNT(ca.member_id)) AS available_spots
+FROM classes c
+JOIN class_schedule cs ON c.class_id = cs.class_id
+LEFT JOIN class_attendance ca ON cs.schedule_id = ca.schedule_id
+WHERE cs.schedule_id IN (
+  SELECT schedule_id 
+  FROM class_schedule
+  WHERE date(start_time) = '2025-02-01'
+)
+GROUP BY c.class_id, 
+ c.name, 
+ cs.start_time, 
+ cs.end_time;
+
+--[x] 4.3 Register a member for a class
+INSERT INTO class_attendance (
+  schedule_id, 
+  member_id, 
+  attendance_status)
+VALUES (
+    (SELECT schedule_id 
+     FROM class_schedule 
+     WHERE class_id = 3 
+     AND date(start_time) = '2025-02-01'), 
+    11, 
+    'Registered'
+);
+--[x] 4.4 Cancel a class registration
+DELETE FROM class_attendance
+WHERE schedule_id = 7 AND member_id = 2;
+
+--[x] 4.5 List top 3 most popular classes
+SELECT
+  c.class_id,
+  c.name AS class_name,
+  COUNT(ca.member_id) AS registration_count
+FROM classes AS c  
+JOIN class_schedule AS cs ON c.class_id = cs.class_id  
+LEFT JOIN class_attendance AS ca ON cs.schedule_id = ca.schedule_id  
+GROUP BY c.class_id, c.name  
+ORDER BY registration_count DESC  
+LIMIT 3;  
+
+--[x] 4.6 Calculate average number of classes per member
+SELECT
+ CAST(COUNT(DISTINCT ca.schedule_id) AS REAL) / COUNT(DISTINCT m.member_id) AS average_classes_per_member
+FROM
+ members m
+LEFT JOIN
+ class_attendance ca ON m.member_id = ca.member_id;
+
+-- 5. Membership Management (membership_management.sql)
+-- 1. [x] 5.1 List all active memberships
+SELECT 
+ m.member_id, 
+ m.first_name, 
+ m.last_name, 
+ memberships.type, 
+ m.join_date
+FROM members AS m
+JOIN memberships  ON m.member_id = memberships.member_id
+WHERE memberships.status = 'Active';
+
+-- 2. [x] 5.2 Calculate the average duration of gym visits for each membership type
+SELECT m.type AS MembershipType, 
+CAST(AVG(STRFTIME('%s', a.check_out_time) - STRFTIME('%s', a.check_in_time)) AS REAL) / 60 AS AverageVisitDurationMinutes -- for minutes 
+FROM memberships AS m
+JOIN attendance AS a ON m.member_id = a.member_id
+GROUP BY m.type;
+
+-- 3. [x] 5.3 Identify members with expiring memberships this year
+SELECT 
+ m.member_id, 
+ m.first_name, 
+ m.last_name, 
+ m.email, 
+ ms.end_date
+FROM members AS m
+JOIN memberships AS ms ON m.member_id = ms.member_id
+WHERE strftime('%Y', ms.end_date) = strftime('%Y', 'now') AND ms.status;
+
+-- 6. Attendance Tracking (attendance_tracking.sql)
+-- 1. [x] 6.1 Record a member's gym visit
+INSERT INTO attendance(member_id, location_id, check_in_time)
+VALUES (7, 1, datetime('now'));
+
+-- 2. [x] 6.2 Retrieve a member's attendance history
+SELECT DATE(check_in_time) AS visit_date,
+STRFTIME('%H:%M', check_in_time) AS check_in_time,
+STRFTIME('%H:%M', check_out_time) AS check_out_time
+FROM attendance
+WHERE member_id = 5
+ORDER BY visit_date, check_in_time;
+
+-- 3. [x] 6.3 Find the busiest day of the week based on gym visits
+SELECT CASE strftime('%w', check_in_time)
+ WHEN '0' THEN 'Sunday'
+ WHEN '1' THEN 'Monday'
+ WHEN '2' THEN 'Tuesday'
+ WHEN '3' THEN 'Wednesday'
+ WHEN '4' THEN 'Thursday'
+ WHEN '5' THEN 'Friday'
+ ELSE 'Saturday'
+ END AS day_of_week, COUNT(*) AS visit_count
+FROM attendance
+GROUP BY day_of_week
+ORDER BY visit_count DESC
+LIMIT 1;
+
+-- 4. [x] 6.4 Calculate the average daily attendance for each location
+SELECT 
+ l.name AS location_name, 
+ CAST(COUNT(DISTINCT attendance_id) AS REAL) / COUNT(DISTINCT strftime('%Y-%m-%d', 
+ a.check_in_time)) AS avg_daily_attendance
+FROM locations l
+JOIN attendance a ON l.location_id = a.location_id
+GROUP BY location_name
+ORDER BY avg_daily_attendance DESC;
+
+-- 7. Staff Management (staff_management.sql)
+-- 1. [x] 7.1 List all staff members by role
+SELECT 
+ staff_id, 
+ first_name, 
+ last_name, 
+ position
+FROM staff
+ORDER BY position, last_name, first_name;
+
+-- 2. [x] 7.2 Find trainers with one or more personal training session in the next 30 days
+SELECT 
+ s.staff_id, 
+ s.first_name, 
+ s.last_name
+FROM staff AS s
+JOIN personal_training_sessions AS pts ON s.staff_id = pts.staff_id
+WHERE pts.session_date BETWEEN date('now') AND date('now', '+30 days')
+AND s.position = 'Trainer'
+GROUP BY s.staff_id, s.first_name, s.last_name
+HAVING COUNT(DISTINCT pts.session_id) >= 1;
+
+-- 8. Personal Training (personal_training.sql)
+-- 1. [x] 8.1 List all personal training sessions for a specific trainer
+SELECT 
+  pts.session_id,
+  m.first_name || ' ' || m.last_name AS member_name,
+  pts.session_date,
+  pts.start_time,
+  pts.end_time
+FROM personal_training_sessions pts
+JOIN members m ON pts.member_id = m.member_id
+WHERE m.first_name = 'Ivy' AND m.last_name = 'Irwin'; 
